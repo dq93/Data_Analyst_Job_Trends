@@ -1,17 +1,10 @@
-+-----------------+         +-------------+        +-------------------+
-|   JobListing    |         |   Salary    |        |  SearchMetadata   |
-+-----------------+         +-------------+        +-------------------+
-| job_id (PK)     |<--------| job_id (FK) |        | search_term       |
-| title           |         | salary      |        | search_location   |
-| company_name    |         | salary_pay  |        | date_time         |
-| location        |         | salary_rate |        +-------------------+
-| via             |         | salary_avg  |
-| description     |         | salary_min  |
-| extensions      |         | salary_max  |
-| thumbnail       |         | salary_hourly|
-| posted_at       |         | salary_yearly|
-| schedule_type   |         | salary_standardized |
-| work_from_home  |         +-------------+
-| commute_time    |
-| description_tokens |
-+-----------------+
+We could create 2 tables:
+Job Listing and Salary
+
+Job Listing would have: 
+job_id as primary key, title, company_name, location, via, description, extensions, posted_at, schedule_type, description_tokens
+
+Salary would have:
+job_id as a foreign key, salary_rate, salary_avg, salary_min, salary_max, salary_standardized, salary_hourly
+
+note: some features were not considered as they may be dropped.
