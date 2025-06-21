@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-### We are exxploring job market trends for data analyst roles: skills in demand, salary shifts, and hiring patterns over time. This dataset compiles job postings for Data Analyst positions in the United States, sourced directly from Google's job search results. Data collection began on November 4th, 2022, and continues to grow with approximately 100 new postings added daily, offering a continuously updated snapshot of the job market.
+#### We are exploring job market trends for data analyst roles: skills in demand, salary shifts, and hiring patterns over time. This dataset compiles job postings for Data Analyst positions in the United States, sourced directly from Google's job search results. Data collection began on November 4th, 2022, and continues to grow with approximately 100 new postings added daily, offering a continuously updated snapshot of the current job market.
 
 ## This Project has 3 parts:
 - Exploratory Data Analysis: Univariate, Bivariate, and Multivariate
