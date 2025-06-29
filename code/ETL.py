@@ -30,6 +30,7 @@ def download_dataset() -> str:
     return csv_path
 
 
+
 def clean_schedule_type(df: pd.DataFrame) -> pd.DataFrame:
     """Clean and one-hot encode schedule_type column."""
     # Fill nulls with empty strings
@@ -109,6 +110,7 @@ def clean_salary_column(df: pd.DataFrame) -> pd.DataFrame:
     mean_salary = df['salary_cleaned'].mean()
     df['salary_cleaned'] = df['salary_cleaned'].fillna(mean_salary)
     return df
+
 
 
 def load_to_postgres(df: pd.DataFrame, table_name: str = "job_postings") -> None:
