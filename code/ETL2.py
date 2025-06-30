@@ -96,7 +96,7 @@ def transform_data(df: pd.DataFrame) -> pd.DataFrame:
     )
     return df
 
-def load_to_postgres(df: pd.DataFrame, table_name: str = "job_postings2"):
+def load_to_postgres(df: pd.DataFrame, table_name: str = "job_postings"):
     load_dotenv()
     db_user = os.getenv("DB_USER")
     db_password = os.getenv("DB_PASSWORD")
