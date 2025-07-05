@@ -19,14 +19,6 @@ df = pd.read_csv("data/gsearch_jobs.csv")
 
 # Data transformation
 
-df.head()
-
-df.columns
-
-df.describe()
-
-df.dtypes
-
 df[df.duplicated("job_id")]
 
 # Remove duplicates from "Job_id" and keep those that were posted first
