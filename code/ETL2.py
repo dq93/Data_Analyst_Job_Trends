@@ -1,121 +1,159 @@
 import os
 import re
+import json
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from collections import Counter
+from sqlalchemy import create_engine, text
 from kaggle.api.kaggle_api_extended import KaggleApi
-from sqlalchemy import create_engine
 
+# Load environment and DB connection
+load_dotenv()
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME")
+ENGINE = create_engine(f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+
+
+# Download dataset
 def download_dataset() -> pd.DataFrame:
-    api = KaggleApi()
-    api.authenticate()
-
-    dataset_slug = 'lukebarousse/data-analyst-job-postings-google-search'
-    download_folder = 'data'
-    csv_filename = 'gsearch_jobs.csv'
-    csv_path = os.path.join(download_folder, csv_filename)
-
-    os.makedirs(download_folder, exist_ok=True)
-
+    csv_path = 'data/gsearch_jobs.csv'
     if not os.path.exists(csv_path):
-        print("Downloading from Kaggle...")
-        api.dataset_download_files(dataset_slug, path=download_folder, unzip=True)
-    else:
-        print("File already exists locally. Skipping download.")
-    
+        os.makedirs("data", exist_ok=True)
+        print("📥 Downloading dataset from Kaggle...")
+        KaggleApi().authenticate()
+        KaggleApi().dataset_download_files(
+            'lukebarousse/data-analyst-job-postings-google-search',
+            path='data', unzip=True
+        )
     return pd.read_csv(csv_path)
 
-def normalize_title(title):
-    title = title.lower()
-    title = re.sub(r'(sr\\.?|senior)', 'senior', title)
-    title = re.sub(r'(jr\\.?|junior)', 'junior', title)
-    title = re.sub(r'\\s*-\\s*.*$', '', title)
-    title = re.sub(r'[^\\w\\s]', '', title)
-    return title.strip()
 
-def feature_engineer_schedule_type(df: pd.DataFrame) -> pd.DataFrame:
-    all_types = ['Full-time', 'Part-time', 'Contractor', 'Internship', 'Temp work', 'Per diem', 'Volunteer']
-    df = df.copy()
-    df['schedule_type'] = df['schedule_type'].fillna('')
-    for t in all_types:
-        df[t] = df['schedule_type'].apply(lambda x: int(t in x))
+# Normalize title
+def normalize_title(t: str) -> str:
+    if not isinstance(t, str): return ""
+    t = t.lower()
+    t = re.sub(r'(sr\.?|senior)', 'senior', t)
+    t = re.sub(r'(jr\.?|junior)', 'junior', t)
+    t = re.sub(r'\s*-\s*.*$', '', t)
+    return re.sub(r'[^\w\s]', '', t).strip().title()
+
+
+# Skill list and matcher
+SKILLS = ["Python", "R", "SQL", "Java", "Scala", "Excel", "Tableau",
+          "Power BI", "Looker", "AWS", "GCP", "Spark", "Docker",
+          "Kubernetes", "Pandas", "NumPy", "TensorFlow", "PyTorch"]
+
+def extract_skills(text: str) -> list[str]:
+    return [s for s in SKILLS if re.search(rf"\b{re.escape(s)}\b", text, re.IGNORECASE)]
+
+
+# Transform raw df
+def transform(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.drop_duplicates(subset="job_id").copy()
+    df['company_name'] = df['company_name'].fillna('Unknown').str.strip()
+    df['title'] = df['title'].apply(normalize_title)
+    df['location'] = df['location'].fillna('Unknown').str.strip()
+    df['via'] = df['via'].fillna('').str.replace(r'^via\s+', '', regex=True).str.strip()
+    df['description'] = df['description'].fillna('').astype(str)
+
+    df['skills_found'] = df['description'].apply(extract_skills)
+    df['has_experience_requirement'] = df['description'].str.contains(r'\d+\+\s*(years|yrs)', case=False, na=False)
+    df['has_degree_requirement'] = df['description'].str.contains(r"(Bachelor|Master|Ph\.?D|degree)", case=False, na=False)
+    df['has_pay_range'] = df['description'].str.contains(r'\$\d+', na=False)
+
+    df['state'] = df['location'].str.extract(r',\s*([A-Z]{2})')
+    df['state_clean'] = np.where(df['location'].isin(['United States', 'Anywhere']),
+                                  df['location'], df['state'])
+    # Safe salary parsing (adapt as needed if salary columns exist)
+    df['salary_rate'] = None
+    df['salary_min'] = None
+    df['salary_max'] = None
+    df['salary_standardized'] = None
+
+    # Tokenize description
+    df['description_tokens'] = df['description'].str.lower().str.split()
     return df
 
-def find_skills(text, skills):
-    return [skill for skill in skills if re.search(rf"\\b{re.escape(skill)}\\b", text, re.IGNORECASE)]
 
-def transform_data(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.drop_duplicates(subset="job_id", keep="first")
-    columns_to_drop = [
-        'Unnamed: 0', 'index', 'search_term', 'search_location', 'commute_time',
-        'thumbnail', 'salary', 'salary_pay', 'salary_yearly', 'salary_hourly', 'salary_avg'
-    ]
-    df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
+# Helper for unique mappings
+def insert_and_map(df: pd.DataFrame, table: str, field: str, id_field: str, extras=None) -> dict:
+    df = df.drop_duplicates(subset=field)
+    cols = [field] + (extras or [])
+    df[cols].to_sql(table, ENGINE, if_exists="append", index=False, method='multi')
+    with ENGINE.connect() as conn:
+        rows = conn.execute(text(f"SELECT {id_field}, {field} FROM {table}")).fetchall()
+    return {val: key for key, val in rows}
 
-    df["title"] = df["title"].str.replace(r"[^a-zA-Z0-9\\s,./&()\\-]", "", regex=True)
-    df["title"] = df["title"].str.title()
-    df["title"] = df["title"].apply(normalize_title)
 
-    df['via'] = df['via'].str.replace(r'^via\\s+', '', regex=True).str.strip()
-    df['location'] = df['location'].str.strip()
+# Populate all tables
+def populate_all(df: pd.DataFrame):
+    df = transform(df)
 
-    df = feature_engineer_schedule_type(df)
+    company_map = insert_and_map(df[['company_name']], 'companies', 'company_name', 'company_id')
+    loc_map = insert_and_map(df[['location', 'state', 'state_clean']].drop_duplicates(),
+                              'locations', 'location', 'location_id', extras=['state', 'state_clean'])
+    skill_map = insert_and_map(pd.DataFrame({'skill_name': sorted({s for sl in df['skills_found'] for s in sl})}),
+                                'skills', 'skill_name', 'skill_id')
 
-    exp_pattern = r"(?:(?:at least|min(?:imum)? of)\\s*\\d+\\s*years?)|(?:\\d+\\+?\\s*[-–]?\\s*\\d*\\s*years?)"
-    degree_pattern = r"(?:Bachelor(?:'s)?|BA|BS|BSc|Master(?:'s)?|MS|MSc|MBA|PhD|Doctorate|degree in [A-Za-z ]+)"
-    df["Has_experience_requirement"] = df["description"].str.contains(exp_pattern, flags=re.IGNORECASE, regex=True, na=False)
-    df["Has_degree_requirement"] = df["description"].str.contains(degree_pattern, flags=re.IGNORECASE, regex=True, na=False)
+    jobs = []
+    for idx, row in df.iterrows():
+        company_id = company_map.get(row['company_name'].strip())
+        location_id = loc_map.get(row['location'].strip())
 
-    skills = [
-        "Python", "R", "SQL", "Java", "Scala", "Excel", "Microsoft Excel", "Tableau", "Power BI", 
-        "Looker", "Google Sheets", "Matplotlib", "Seaborn", "Apache Airflow", "dbt", "Apache NiFi", 
-        "SSIS", "Informatica", "Talend", "MySQL", "PostgreSQL", "Oracle", "Redshift", "Snowflake", 
-        "BigQuery", "MongoDB", "AWS", "Azure", "GCP", "Google Cloud Platform", "Apache Spark", 
-        "Hadoop", "Kafka", "Hive", "Presto", "Docker", "Kubernetes", "Terraform", "Git", "GitHub", 
-        "Scikit-learn", "TensorFlow", "Keras", "XGBoost", "Pandas", "NumPy"
-    ]
-    df["description"] = df["description"].fillna("")
+        if not row['job_id']:
+            print(f"❌ Missing job_id, skipping row")
+            continue
 
-    for skill in skills:
-        df[skill] = df["description"].str.contains(rf"\\b{re.escape(skill)}\\b", case=False, regex=True)
-    
-    df["skills_found"] = df["description"].apply(lambda text: find_skills(text, skills))
+        if company_id is None:
+            print(f"❌ Company not found: '{row['company_name']}'")
+            continue
 
-    df['state'] = df['location'].str.extract(r',\\s*([A-Z]{2})')
-    df['state_clean'] = np.where(
-        df['location'].isin(['United States', 'Anywhere']),
-        df['location'],
-        df['state']
-    )
+        if location_id is None:
+            print(f"❌ Location not found: '{row['location']}'")
+            continue
 
-    text_cols = [col for col in ['description', 'extensions'] if col in df.columns]
-    df['has_pay_range'] = df[text_cols].apply(
-        lambda row: row.astype(str).str.contains(r'\\$\\d+', case=False, na=False).any(),
-        axis=1
-    )
-    return df
+        jobs.append({
+            'job_id': row['job_id'],
+            'title': row['title'],
+            'company_id': company_map[row['company_name']],
+            'location_id': loc_map[row['location']],
+            'via': row['via'],
+            'description': row['description'],
+            'posted_at': None,
+            'schedule_type': row.get('schedule_type', ''),
+            'work_from_home': bool(row.get('Work from home', False)),
+            'date_time': pd.Timestamp.now(),
+            'salary_rate': row['salary_rate'],
+            'salary_min': row['salary_min'],
+            'salary_max': row['salary_max'],
+            'salary_standardized': row['salary_standardized'],
+            'description_tokens': row['description_tokens'],
+            'has_experience_requirement': bool(row['has_experience_requirement']),
+            'has_degree_requirement': bool(row['has_degree_requirement']),
+            'has_pay_range': bool(row['has_pay_range']),
+        })
 
-def load_to_postgres(df: pd.DataFrame, table_name: str = "job_postings"):
-    load_dotenv()
-    db_user = os.getenv("DB_USER")
-    db_password = os.getenv("DB_PASSWORD")
-    db_host = os.getenv("DB_HOST", "localhost")
-    db_port = os.getenv("DB_PORT", "5432")
-    db_name = os.getenv("DB_NAME")
-    db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-    engine = create_engine(db_url)
-    df.to_sql(table_name, engine, if_exists="replace", index=False)
-    print(f"Data loaded into table `{table_name}` in database `{db_name}`")
+    pd.DataFrame(jobs).to_sql('jobs', ENGINE, if_exists="append", index=False, method='multi')
+
+    # Populate join table
+    rows = []
+    for _, row in df.iterrows():
+        for skill in row['skills_found']:
+            sid = skill_map.get(skill)
+            if sid:
+                rows.append({'job_id': row['job_id'], 'skill_id': sid})
+    pd.DataFrame(rows).drop_duplicates().to_sql('job_skills', ENGINE, index=False,
+                                               if_exists="append", method='multi')
+
+    print("✅ Populated all tables successfully.")
+
 
 def main():
     df = download_dataset()
-    df = transform_data(df)
-    os.makedirs("data/processed", exist_ok=True)
-    df.to_csv("data/processed/cleaned_gsearch_jobs.csv", index=False)
-    print("Cleaned data saved to: data/processed/cleaned_gsearch_jobs.csv")
-    load_to_postgres(df)
+    populate_all(df)
 
 if __name__ == "__main__":
     main()
-
