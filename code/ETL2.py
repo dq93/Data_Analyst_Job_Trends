@@ -1,59 +1,183 @@
+
 import os
+import re
+import numpy as np
 import pandas as pd
+import psycopg2
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from collections import Counter
+from kaggle.api.kaggle_api_extended import KaggleApi
+from sqlalchemy import create_engine
 
-# Load environment and DB connection
-load_dotenv()
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME")
-engine = create_engine(f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+def download_dataset() -> pd.DataFrame:
+    api = KaggleApi()
+    api.authenticate()
 
-df = pd.read_csv('/Users/sa22/Documents/code/Data_Analyst_Job_Trends/data/cleaned_gsearch_jobs.csv')
-import ast
-df['skills_found'] = df['skills_found'].apply(ast.literal_eval)
+    dataset_slug = 'lukebarousse/data-analyst-job-postings-google-search'
+    download_folder = 'data'
+    csv_filename = 'gsearch_jobs.csv'
+    csv_path = os.path.join(download_folder, csv_filename)
 
+    os.makedirs(download_folder, exist_ok=True)
 
-companies_df = df[['company_name']].drop_duplicates().dropna()
-companies_df.to_sql('companies', engine, if_exists='append', index=False)
+    if not os.path.exists(csv_path):
+        print("Downloading from Kaggle...")
+        api.dataset_download_files(dataset_slug, path=download_folder, unzip=True)
+    else:
+        print("File already exists locally. Skipping download.")
 
-with engine.connect() as conn:
-    company_ids = dict(conn.execute(text("SELECT company_name, company_id FROM companies")).fetchall())
+    return pd.read_csv(csv_path)
 
-locations_df = df[['location', 'state']].drop_duplicates().dropna()
-locations_df.columns = ['location', 'state']
-locations_df.to_sql('locations', engine, if_exists='append', index=False)
+def normalize_title(title: str) -> str:
+    title = title.lower()
+    title = re.sub(r'(sr\.?|senior)', 'senior', title)
+    title = re.sub(r'(jr\.?|junior)', 'junior', title)
+    title = re.sub(r'\s*-\s*.*$', '', title)
+    title = re.sub(r'[^\w\s]', '', title)
+    return title.strip()
 
-with engine.connect() as conn:
-    location_ids = dict(conn.execute(text("SELECT location, location_id FROM locations")).fetchall())
+def feature_engineer_schedule_type(df: pd.DataFrame) -> pd.DataFrame:
+    all_types = ['Full-time', 'Part-time', 'Contractor', 'Internship', 'Temp work', 'Per diem', 'Volunteer']
+    df = df.copy()
+    df['schedule_type'] = df['schedule_type'].fillna('')
+    for t in all_types:
+        df[t] = df['schedule_type'].apply(lambda x: int(t in x))
+    return df
 
-skills_list = sorted({skill for row in df['skills_found'] for skill in row})
-skills_df = pd.DataFrame({'skill_name': skills_list})
-skills_df.to_sql('skills', engine, if_exists='append', index=False)
+def find_skills(text: str, skills: list) -> list:
+    return [skill for skill in skills if re.search(rf"\b{re.escape(skill)}\b", text, re.IGNORECASE)]
 
-with engine.connect() as conn:
-    skill_ids = dict(conn.execute(text("SELECT skill_name, skill_id FROM skills")).fetchall())
+def transform_data(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.drop_duplicates(subset="job_id", keep="first")
+    columns_to_drop = [
+        'Unnamed: 0', 'index', 'search_term', 'search_location', 'commute_time',
+        'thumbnail', 'salary', 'salary_pay', 'salary_yearly', 'salary_hourly', 'salary_avg'
+    ]
+    df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
 
-jobs_df = df.copy()
+    df["title"] = df["title"].str.replace(r"[^a-zA-Z0-9\s,./&()\-]", "", regex=True)
+    df["title"] = df["title"].str.title().apply(normalize_title)
+    df['via'] = df['via'].str.replace(r'^via\s+', '', regex=True).str.strip()
+    df['location'] = df['location'].str.strip()
 
-jobs_df['company_id'] = jobs_df['company_name'].map(company_ids)
-jobs_df = jobs_df.dropna(subset=['company_id'])
+    df = feature_engineer_schedule_type(df)
 
-jobs_insert = jobs_df[['job_id', 'title', 'company_id', 'has_experience_requirement',
-                       'has_degree_requirement', 'work_from_home']].copy()
-jobs_insert['date_time'] = pd.Timestamp.now()
+    exp_pattern = r"(?:(?:at least|min(?:imum)? of)\s*\d+\s*years?)|(?:\d+\+?\s*[-–]?\s*\d*\s*years?)"
+    degree_pattern = r"(?:Bachelor(?:'s)?|BA|BS|BSc|Master(?:'s)?|MS|MSc|MBA|PhD|Doctorate|degree in [A-Za-z ]+)"
+    df["Has_experience_requirement"] = df["description"].str.contains(exp_pattern, flags=re.IGNORECASE, regex=True, na=False)
+    df["Has_degree_requirement"] = df["description"].str.contains(degree_pattern, flags=re.IGNORECASE, regex=True, na=False)
 
-jobs_insert.to_sql('jobs', engine, if_exists='append', index=False)
+    skills = [
+        "Python", "R", "SQL", "Java", "Scala", "Excel", "Microsoft Excel", "Tableau", "Power BI", 
+        "Looker", "Google Sheets", "Matplotlib", "Seaborn", "Apache Airflow", "dbt", "Apache NiFi", 
+        "SSIS", "Informatica", "Talend", "MySQL", "PostgreSQL", "Oracle", "Redshift", "Snowflake", 
+        "BigQuery", "MongoDB", "AWS", "Azure", "GCP", "Google Cloud Platform", "Apache Spark", 
+        "Hadoop", "Kafka", "Hive", "Presto", "Docker", "Kubernetes", "Terraform", "Git", "GitHub", 
+        "Scikit-learn", "TensorFlow", "Keras", "XGBoost", "Pandas", "NumPy"
+    ]
+    df["description"] = df["description"].fillna("")
+    for skill in skills:
+        df[skill] = df["description"].str.contains(rf"\b{re.escape(skill)}\b", case=False, regex=True)
+    df["skills_found"] = df["description"].apply(lambda text: find_skills(text, skills))
 
-rows = []
-for _, row in df.iterrows():
-    for skill in row['skills_found']:
-        skill_id = skill_ids.get(skill)
-        if skill_id:
-            rows.append({'job_id': row['job_id'], 'skill_id': skill_id})
+    df['state'] = df['location'].str.extract(r',\s*([A-Z]{2})')
+    df['state_clean'] = np.where(
+        df['location'].isin(['United States', 'Anywhere']),
+        df['location'],
+        df['state']
+    )
 
-job_skills_df = pd.DataFrame(rows).drop_duplicates()
-job_skills_df.to_sql('job_skills', engine, if_exists='append', index=False)
+    text_cols = [col for col in ['description', 'extensions'] if col in df.columns]
+    df['has_pay_range'] = df[text_cols].apply(
+        lambda row: row.astype(str).str.contains(r'\$\d+', case=False, na=False).any(),
+        axis=1
+    )
+    return df
+
+def create_database_schema():
+    load_dotenv()
+    try:
+        conn = psycopg2.connect(
+            dbname=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            host=os.getenv("DB_HOST"),
+            port=os.getenv("DB_PORT")
+        )
+        conn.autocommit = True
+        cur = conn.cursor()
+
+        schema_sql = """
+        DROP TABLE IF EXISTS job_skills CASCADE;
+        DROP TABLE IF EXISTS jobs CASCADE;
+        DROP TABLE IF EXISTS companies CASCADE;
+        DROP TABLE IF EXISTS locations CASCADE;
+        DROP TABLE IF EXISTS skills CASCADE;
+
+        CREATE TABLE companies (
+            company_id SERIAL PRIMARY KEY,
+            company_name TEXT UNIQUE
+        );
+
+        CREATE TABLE locations (
+            location_id SERIAL PRIMARY KEY,
+            location TEXT,
+            state TEXT,
+            state_clean TEXT
+        );
+
+        CREATE TABLE skills (
+            skill_id SERIAL PRIMARY KEY,
+            skill_name TEXT UNIQUE NOT NULL
+        );
+
+        CREATE TABLE jobs (
+            job_id TEXT PRIMARY KEY,
+            title TEXT,
+            company_id INT REFERENCES companies(company_id),
+            location_id INT REFERENCES locations(location_id),
+            via TEXT,
+            description TEXT,
+            posted_at TIMESTAMP,
+            schedule_type TEXT,
+            work_from_home BOOLEAN,
+            date_time TIMESTAMP,
+            salary_rate TEXT,
+            salary_min NUMERIC,
+            salary_max NUMERIC,
+            salary_standardized NUMERIC,
+            description_tokens TEXT[],
+            has_experience_requirement BOOLEAN,
+            has_degree_requirement BOOLEAN,
+            has_pay_range BOOLEAN
+        );
+
+        CREATE TABLE job_skills (
+            job_id TEXT REFERENCES jobs(job_id) ON DELETE CASCADE,
+            skill_id INT REFERENCES skills(skill_id) ON DELETE CASCADE,
+            PRIMARY KEY (job_id, skill_id)
+        );
+        """
+
+        cur.execute(schema_sql)
+        print("Database schema created successfully")
+
+    except Exception as e:
+        print(f"Error creating database schema: {e}")
+        raise
+    finally:
+        if 'cur' in locals():
+            cur.close()
+        if 'conn' in locals():
+            conn.close()
+
+def main():
+    df = download_dataset()
+    df = transform_data(df)
+    os.makedirs("data/processed", exist_ok=True)
+    df.to_csv("data/processed/cleaned_gsearch_jobs.csv", index=False)
+    create_database_schema()
+    print("ETL process complete.")
+
+if __name__ == "__main__":
+    main()
