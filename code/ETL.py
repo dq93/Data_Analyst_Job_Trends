@@ -4,6 +4,8 @@ import pandas as pd
 import re
 from collections import Counter
 import numpy as np
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
 
 """
 Download a Kaggle dataset of data analyst job postings, extracts the ZIP file, 
@@ -18,14 +20,6 @@ with zipfile.ZipFile("data-analyst-job-postings-google-search.zip", 'r') as zip_
 df = pd.read_csv("data/gsearch_jobs.csv")
 
 # Data transformation
-
-df.head()
-
-df.columns
-
-df.describe()
-
-df.dtypes
 
 df[df.duplicated("job_id")]
 
@@ -55,13 +49,10 @@ df['location'] = df['location'].str.strip()
 def feature_engineer_schedule_type(df):
     all_types = ['Full-time', 'Part-time', 'Contractor', 'Internship', 'Temp work', 'Per diem', 'Volunteer']
     df = df.copy()
-    df['schedule_type'] = df['schedule_type'].fillna('')
+
     for t in all_types:
         df[t] = df['schedule_type'].apply(lambda x: int(t in x))
     return df
-
-df = feature_engineer_schedule_type(df)
-
 
 # Find Min and Max experience required for role
 exp_pattern = r"(?:(?:at least|min(?:imum)? of)\s*\d+\s*years?)|(?:\d+\+?\s*[-–]?\s*\d*\s*years?)"
@@ -125,10 +116,57 @@ df['state_clean'] = np.where(
     df['state']
 )
 
+df = df.drop('state', axis=1)
+df = df.rename(columns={"state_clean": "state"})
+
 text_cols = [col for col in ['description', 'extensions'] if col in df.columns]
 df['has_pay_range'] = df[text_cols].apply(
     lambda row: row.astype(str).str.contains(r'\$\d+', case=False, na=False).any(),
     axis=1
 )
 
+# List of visa keywords to check for
+visa_keywords = ['h-1b', 'h1b', 'h-2b', 'l-1a', 'l-1b', 'o-1', 'eb-2', 'eb2', 'eb-3', 'eb3', 'visa sponsorship']
+
+# Function to return 1 if any visa keyword is found in the description, else 0
+def binary_visa_flag(description):
+    desc = str(description).lower()  # ensure description is a string
+    return int(any(kw in desc for kw in visa_keywords))
+
+# Add the binary column to your existing DataFrame
+df["visa_sponsorship_flag"] = df["description"].apply(binary_visa_flag)
+
+#filling nulls to load SQL tables
+df.replace(['', 'nan', 'NaN', 'None', None], np.nan, inplace=True)
+
+df['salary_max'] = df['salary_max'].fillna(df['salary_max'].median())
+df['salary_min'] = df['salary_min'].fillna(df['salary_min'].median())
+df['salary_standardized'] = df['salary_standardized'].fillna(df['salary_standardized'].median())
+df['salary_rate'] = df['salary_rate'].fillna(df['salary_rate'].mode()[0])
+df['work_from_home'] = df['work_from_home'].fillna(df['work_from_home'].mode()[0])
+df['schedule_type'] = df['schedule_type'].fillna(df['schedule_type'].mode()[0])
+df['state'] = df['state'].fillna(df['state'].mode()[0])
+df['title'] = df['title'].fillna(df['title'].mode()[0])
+df['via'] = df['via'].fillna(df['via'].mode()[0])
+df['posted_at'] = df['posted_at'].fillna(df['posted_at'].mode()[0])
+df['location'] = df['location'].fillna('Unknown')
+
+df = feature_engineer_schedule_type(df)
+
 df.to_csv("data/cleaned_gsearch_jobs.csv", index=False)
+
+"""
+# Load environment variables
+load_dotenv()
+
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME")
+
+engine = create_engine(f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+"""
+# Load the cleaned CSV
+df = pd.read_csv("data/cleaned_gsearch_jobs.csv")
+
