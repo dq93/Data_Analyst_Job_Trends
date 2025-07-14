@@ -36,7 +36,7 @@ df["Has_degree_requirement"] = df["description"].str.contains(degree_pattern, fl
 df["Has_degree_requirement"]
 
 # List of visa keywords to check for
-visa_keywords = ["h-1b', 'h1b', 'h-2b', 'l-1a', 'l-1b', 'o-1', 'eb-2', 'eb2', 'eb-3', 'eb3', 'visa sponsorship"]
+visa_keywords = ["h-1b", "h1b", "h-2b", "l-1a", "l-1b", "o-1", "eb-2", "eb2", "eb-3", "eb3", "visa sponsorship"]
 
 # Function to return 1 if any visa keyword is found in the description, else 0
 def binary_visa_flag(description):
