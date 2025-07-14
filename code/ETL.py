@@ -45,6 +45,8 @@ df['via'] = df['via'].str.replace(r'^via\s+', '', regex=True).str.strip()
 # removes whitespace around locations in the location column
 df['location'] = df['location'].str.strip()
 
+df["date"] = pd.to_datetime(df["date_time"]).dt.date
+
 # function to standardize schedule_type into binary Columns
 def feature_engineer_schedule_type(df):
     all_types = ['Full-time', 'Part-time', 'Contractor', 'Internship', 'Temp work', 'Per diem', 'Volunteer']
@@ -93,7 +95,7 @@ print('creating features, this may take a couple of minutes')
 
 # Create one column for each skill (True if the skill is mentioned)
 for skill in skills:
-    df[skill] = df["description"].str.contains(rf"\b{re.escape(skill)}\b", case=False, regex=True)
+    df[skill] = df["description"].str.contains(rf"\b{re.escape(skill)}\b", case=False, regex=True).astype(int)
 
 # Create a list of skills found in each row
 def find_skills(text):
@@ -155,18 +157,5 @@ df = feature_engineer_schedule_type(df)
 
 df.to_csv("data/cleaned_gsearch_jobs.csv", index=False)
 
-"""
-# Load environment variables
-load_dotenv()
-
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME")
-
-engine = create_engine(f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
-"""
 # Load the cleaned CSV
 df = pd.read_csv("data/cleaned_gsearch_jobs.csv")
-
