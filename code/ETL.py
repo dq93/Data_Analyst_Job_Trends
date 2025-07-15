@@ -76,8 +76,8 @@ df['title'] = df['title'].apply(normalize_title)
 
 # Create Boolean columns to indicate whether a job description mentions
 # experience or degree requirements based on regex pattern matching
-df["Has_experience_requirement"] = df["description"].str.contains(exp_pattern, flags=re.IGNORECASE)
-df["Has_degree_requirement"] = df["description"].str.contains(degree_pattern, flags=re.IGNORECASE, regex=True)
+df["Has_experience_requirement"] = df["description"].str.contains(exp_pattern, flags=re.IGNORECASE,regex=True).astype(int)
+df["Has_degree_requirement"] = df["description"].str.contains(degree_pattern, flags=re.IGNORECASE, regex=True).astype(int)
 
 # List of desired technical skills
 skills = [
