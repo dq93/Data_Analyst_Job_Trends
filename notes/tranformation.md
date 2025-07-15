@@ -1,0 +1,6 @@
+### Schedule_type transformation
+To prepare the schedule_type column for analysis, I first filled null values with empty strings to avoid processing errors, then standardized the text by converting everything to lowercase and normalizing separators like commas and the word "and." Each entry was split into a list of individual schedule types, and any leading "and" phrases were stripped out for clarity. I also unified common variations using a renaming dictionary for example, converting both "full time" and "fulltime" to "full-time" to for consistency. Since some job postings included multiple schedule types in a single row, I used MultiLabelBinarizer to one-hot encode the lists into binary columns like is_full_time or is_part_time, and merged these columns back into the original DataFrame. 
+
+ ### salary_pay transformation
+
+ To clean and prepare the salary data for analysis, I create a function that first removed symbols like dollar signs and commas to ensure all values were numeric. I then converted values like “90K” into their full numerical form by multiplying them by 1,000. For entries listed as ranges “50-60”, I calculated the average to represent a single salary value. Finally, I handled missing values by filling them with the mean salary, maintaining consistency and minimizing bias in downstream analysis.
