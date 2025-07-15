@@ -6,6 +6,12 @@ from collections import Counter
 import numpy as np
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+import os
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
 """
 Download a Kaggle dataset of data analyst job postings, extracts the ZIP file, 
@@ -44,6 +50,8 @@ df['via'] = df['via'].str.replace(r'^via\s+', '', regex=True).str.strip()
 
 # removes whitespace around locations in the location column
 df['location'] = df['location'].str.strip()
+
+df["date"] = pd.to_datetime(df["date_time"]).dt.date
 
 # function to standardize schedule_type into binary Columns
 def feature_engineer_schedule_type(df):
@@ -93,7 +101,7 @@ print('creating features, this may take a couple of minutes')
 
 # Create one column for each skill (True if the skill is mentioned)
 for skill in skills:
-    df[skill] = df["description"].str.contains(rf"\b{re.escape(skill)}\b", case=False, regex=True)
+    df[skill] = df["description"].str.contains(rf"\b{re.escape(skill)}\b", case=False, regex=True).astype(int)
 
 # Create a list of skills found in each row
 def find_skills(text):
@@ -152,8 +160,14 @@ df['posted_at'] = df['posted_at'].fillna(df['posted_at'].mode()[0])
 df['location'] = df['location'].fillna('Unknown')
 
 df = feature_engineer_schedule_type(df)
+from sqlalchemy.orm import sessionmaker
+
+
 
 df.to_csv("data/cleaned_gsearch_jobs.csv", index=False)
+
+# Load the cleaned CSV
+df = pd.read_csv("data/cleaned_gsearch_jobs.csv")
 
 
 # Load environment variables
@@ -165,7 +179,45 @@ DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME")
 
+# Create SQLAlchemy engine
 engine = create_engine(f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
 
-# Load the cleaned CSV
-df = pd.read_csv("data/cleaned_gsearch_jobs.csv")
+# SQL to drop and create tables 
+create_tables_sql = """
+DROP TABLE IF EXISTS job_skills, skills, jobs, companies, locations CASCADE;
+
+CREATE TABLE companies (
+    company_id SERIAL PRIMARY KEY,
+    company_name TEXT UNIQUE
+);
+
+CREATE TABLE locations (
+    location_id SERIAL PRIMARY KEY,
+    location TEXT,
+    state TEXT,
+    state_clean TEXT
+);
+
+CREATE TABLE skills (
+    skill_id SERIAL PRIMARY KEY,
+    skill_name TEXT UNIQUE NOT NULL
+);
+
+CREATE TABLE jobs (
+    job_id TEXT PRIMARY KEY,
+    title TEXT,
+    company_id INT REFERENCES companies(company_id),
+    date_time TIMESTAMP,
+    Has_experience_requirement INT,
+    has_degree_requirement INT,
+    work_from_home BOOLEAN
+);
+"""
+
+# Run the SQL statements
+with engine.connect() as conn:
+    for statement in create_tables_sql.strip().split(";"):
+        if statement.strip():
+            conn.execute(text(statement.strip()))
+
+print("Tables created successfully in PostgreSQL.")
