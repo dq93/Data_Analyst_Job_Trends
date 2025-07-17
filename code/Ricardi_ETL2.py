@@ -164,27 +164,25 @@ from sqlalchemy.orm import sessionmaker
 
 
 
-df.to_csv("data/cleaned_gsearch_jobs.csv", index=False)
+df.to_csv("/Users/sa21/Desktop/Data_Analyst_Job_Trends/data/cleaned_gsearch_jobs.csv", index=False)
 
 # Load the cleaned CSV
-df = pd.read_csv("data/cleaned_gsearch_jobs.csv")
-
-
-# Load environment variables
 load_dotenv()
-
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME")
 
-# Create SQLAlchemy engine
+# Connect to PostgreSQL
 engine = create_engine(f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
 
-# SQL to drop and create tables 
+# Load the cleaned CSV
+df = pd.read_csv("data/cleaned_gsearch_jobs.csv")
+
+# === CREATE TABLES ===
 create_tables_sql = """
-DROP TABLE IF EXISTS job_skills, skills, jobs, companies, locations CASCADE;
+DROP TABLE IF EXISTS job_skills, skills, jobs, locations, companies CASCADE;
 
 CREATE TABLE companies (
     company_id SERIAL PRIMARY KEY,
@@ -200,24 +198,84 @@ CREATE TABLE locations (
 
 CREATE TABLE skills (
     skill_id SERIAL PRIMARY KEY,
-    skill_name TEXT UNIQUE NOT NULL
+    skill_name TEXT UNIQUE
 );
 
 CREATE TABLE jobs (
     job_id TEXT PRIMARY KEY,
-    title TEXT,
-    company_id INT REFERENCES companies(company_id),
+    company_id INT,
     date_time TIMESTAMP,
-    Has_experience_requirement INT,
-    has_degree_requirement INT,
+    has_experience_requirement BOOLEAN,
+    has_degree_requirement BOOLEAN,
     work_from_home BOOLEAN
+);
+
+CREATE TABLE job_skills (
+    job_id TEXT,
+    skill_id INT,
+    PRIMARY KEY (job_id, skill_id),
+    FOREIGN KEY (job_id) REFERENCES jobs(job_id),
+    FOREIGN KEY (skill_id) REFERENCES skills(skill_id)
 );
 """
 
-# Run the SQL statements
 with engine.connect() as conn:
     for statement in create_tables_sql.strip().split(";"):
         if statement.strip():
             conn.execute(text(statement.strip()))
+    conn.commit()
+print("Tables created successfully.")
 
-print("Tables created successfully in PostgreSQL.")
+# === Insert into companies ===
+df['company_id'] = df.groupby('company_name').ngroup() + 1
+companies_df = df[['company_id', 'company_name']].drop_duplicates()
+companies_df.to_sql("companies", engine, if_exists="append", index=False)
+
+# === Insert into locations ===
+df['location_id'] = df.groupby(['location', 'state']).ngroup() + 1
+locations_df = df[['location_id', 'location', 'state']].drop_duplicates()
+locations_df['state_clean'] = locations_df['state']
+locations_df.to_sql("locations", engine, if_exists="append", index=False)
+
+# === Insert into jobs ===
+jobs_df = df[['job_id', 'company_id', 'date_time', 'Has_experience_requirement',
+              'Has_degree_requirement', 'work_from_home']].copy()
+jobs_df = jobs_df.rename(columns={
+    'Has_experience_requirement': 'has_experience_requirement',
+    'Has_degree_requirement': 'has_degree_requirement'
+})
+jobs_df.to_sql("jobs", engine, if_exists="append", index=False)
+
+# === Handle skills ===
+skills = [
+    "Python", "R", "SQL", "Java", "Scala", "Excel", "Microsoft Excel", "Tableau", "Power BI", 
+    "Looker", "Google Sheets", "Matplotlib", "Seaborn", "Apache Airflow", "dbt", "Apache NiFi", 
+    "SSIS", "Informatica", "Talend", "MySQL", "PostgreSQL", "Oracle", "Redshift", "Snowflake", 
+    "BigQuery", "MongoDB", "AWS", "Azure", "GCP", "Google Cloud Platform", "Apache Spark", 
+    "Hadoop", "Kafka", "Hive", "Presto", "Docker", "Kubernetes", "Terraform", "Git", "GitHub", 
+    "Scikit-learn", "TensorFlow", "Keras", "XGBoost", "Pandas", "NumPy"
+]
+
+# 1. Insert into `skills` table
+skill_df = pd.DataFrame({'skill_name': sorted(skills)})
+skill_df.to_sql("skills", engine, if_exists="append", index=False)
+
+# 2. Map skill_name to skill_id
+with engine.connect() as conn:
+    result = conn.execute(text("SELECT skill_id, skill_name FROM skills"))
+    skill_map = {row.skill_name: row.skill_id for row in result}
+
+# 3. Insert into `job_skills`
+job_skills_records = []
+for i, row in df.iterrows():
+    for skill in row['skills_found'].strip("[]").replace("'", "").split(", "):
+        if skill in skill_map:
+            job_skills_records.append({
+                'job_id': row['job_id'],
+                'skill_id': skill_map[skill]
+            })
+
+job_skills_df = pd.DataFrame(job_skills_records)
+job_skills_df.to_sql("job_skills", engine, if_exists="append", index=False)
+
+print("Data loaded into PostgreSQL.")
