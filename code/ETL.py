@@ -181,7 +181,31 @@ valid_states['location_state']
 df['State'] = valid_states['location_state']
 
 # Droppping columns and features no longer needed
-df.drop(columns=['location_df', 'location_city', 'state_result', 'region_keyword', 'region_state', 'location_state'])
+df = df.drop(columns=['location_df', 'location_city', 'state_result', 'region_keyword', 'region_state', 'location_state'])
+
+# Adding work type feature
+
+def classify_work_type(text):
+    text_lower = text.lower() if isinstance(text, str) else ''
+    remote_keywords = ["remote", "work from home", "telecommute", "virtual", "distributed team"]
+    hybrid_keywords = ["hybrid", "partial remote", "partially remote", "flexible location", "mix of remote and office"]
+    in_office_keywords = ["on-site", "onsite", "in-office", "office-based", "must be onsite", "must be on site"]
+    # Check remote first
+    if any(kw in text_lower for kw in remote_keywords):
+        if any(kw in text_lower for kw in hybrid_keywords):
+            return "Hybrid"
+        else:
+            return "Remote"
+    # Then check hybrid if remote not found
+    if any(kw in text_lower for kw in hybrid_keywords):
+        return "Hybrid"
+    # Then check in-office
+    if any(kw in text_lower for kw in in_office_keywords):
+        return "In-Office"
+    # If none matched
+    return "Unknown"
+# Add the new feature column to your DataFrame
+df['Work_type'] = df['description'].apply(classify_work_type)
 
 #filling nulls to load SQL tables
 df.replace(['', 'nan', 'NaN', 'None', None], np.nan, inplace=True)
