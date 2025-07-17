@@ -110,16 +110,6 @@ skill_counts = Counter(all_skills)
 # Put into a DataFrame
 skill_df = pd.DataFrame(skill_counts.most_common(20), columns=["Skill", "Frequency"])
 
-# creates state and state_clean features
-df['state'] = df['location'].str.extract(r',\s*([A-Z]{2})')
-df['state_clean'] = np.where(
-    df['location'].isin(['United States', 'Anywhere']),
-    df['location'],
-    df['state']
-)
-
-df = df.drop('state', axis=1)
-df = df.rename(columns={"state_clean": "state"})
 
 text_cols = [col for col in ['description', 'extensions'] if col in df.columns]
 df['has_pay_range'] = df[text_cols].apply(
@@ -138,6 +128,61 @@ def binary_visa_flag(description):
 # Add the binary column to your existing DataFrame
 df["visa_sponsorship_flag"] = df["description"].apply(binary_visa_flag)
 
+# Using regions to find and filter states
+df['description'] = df['description'].fillna('').astype(str)
+def city_state(text):
+    matches = re.findall(r'\b([A-Za-z\s]+),\s*([A-Z]{2})\b', text)
+    return matches
+df['location_df'] = df['description'].apply(city_state)
+df['location_city'] = df['location_df'].apply(lambda x: x[0][0] if x else None)
+df['location_state'] = df['location_df'].apply(lambda x: x[0][1] if x else None)
+location_keywords = {
+    "bay area": "CA",
+    "silicon valley": "CA",
+    "new york city": "NY",
+    "nyc": "NY",
+    "tri-state": "NY",
+    "los angeles": "CA",
+    "seattle area": "WA",
+    "greater seattle": "WA",
+    "dfw": "TX",
+    "chicago area": "IL",
+    "atlanta metro": "GA",
+    "boston area": "MA",
+    "san francisco": "CA",
+    "washington dc": "DC"
+}
+def find_region_keywords(text):
+    text = text.lower()
+    for keyword, state in location_keywords.items():
+        if keyword in text:
+            return keyword, state
+        return None, None
+
+df[['region_keyword', 'region_state']] = df['description'].apply(lambda x: pd.Series(find_region_keywords(x)))
+def choose_state(row):
+    return row['location_state'] if pd.notnull(row['location_state']) else row['region_state']
+
+df['state_result'] = df.apply(choose_state, axis=1)
+job_counts = df['state_result'].value_counts().sort_values(ascending=False)
+
+us_states = {
+    'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
+    'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
+    'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+    'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
+    'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+    'DC'
+}
+valid_states = df[df['state_result'].isin(us_states)]
+
+valid_states['location_state']
+
+df['State'] = valid_states['location_state']
+
+# Droppping columns and features no longer needed
+df.drop(columns=['location_df', 'location_city', 'state_result', 'region_keyword', 'region_state', 'location_state'])
+
 #filling nulls to load SQL tables
 df.replace(['', 'nan', 'NaN', 'None', None], np.nan, inplace=True)
 
@@ -147,7 +192,9 @@ df['salary_standardized'] = df['salary_standardized'].fillna(df['salary_standard
 df['salary_rate'] = df['salary_rate'].fillna(df['salary_rate'].mode()[0])
 df['work_from_home'] = df['work_from_home'].fillna(df['work_from_home'].mode()[0])
 df['schedule_type'] = df['schedule_type'].fillna(df['schedule_type'].mode()[0])
-df['state'] = df['state'].fillna(df['state'].mode()[0])
+
+df['State'] = df['State'].fillna(df['State'].mode()[0])
+
 df['title'] = df['title'].fillna(df['title'].mode()[0])
 df['via'] = df['via'].fillna(df['via'].mode()[0])
 df['posted_at'] = df['posted_at'].fillna(df['posted_at'].mode()[0])
@@ -155,7 +202,7 @@ df['location'] = df['location'].fillna('Unknown')
 
 df = feature_engineer_schedule_type(df)
 
-df.to_csv("data/cleaned_gsearch_jobs.csv", index=False)
+df.to_csv("data/cleaned_gsearch_jobs.csv", index=False, encoding='utf-8')
 
 # Load the cleaned CSV
 df = pd.read_csv("data/cleaned_gsearch_jobs.csv")
