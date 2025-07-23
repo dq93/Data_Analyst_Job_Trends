@@ -4,8 +4,6 @@ import pandas as pd
 import re
 from collections import Counter
 import numpy as np
-from dotenv import load_dotenv
-from sqlalchemy import create_engine
 
 """
 Download a Kaggle dataset of data analyst job postings, extracts the ZIP file, 
@@ -14,40 +12,42 @@ and load the job data into a pandas DataFrame.
 
 os.system("kaggle datasets download -d lukebarousse/data-analyst-job-postings-google-search")
 
-with zipfile.ZipFile("data-analyst-job-postings-google-search.zip", 'r') as zip_ref:
-    zip_ref.extractall("data")
+zip_path = "data-analyst-job-postings-google-search.zip"
+with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+    zip_ref.extractall("data/raw")
+os.remove(zip_path)    
 
-df = pd.read_csv("data/gsearch_jobs.csv")
+df = pd.read_csv("data/raw/gsearch_jobs.csv")
 
-# Data transformation
+# ===Data transformation===
 
 df[df.duplicated("job_id")]
 
 # Remove duplicates from "Job_id" and keep those that were posted first
 df = df.drop_duplicates(subset="job_id", keep="first")
 
-# dropping columns
+# Dropping columns
 columns_to_drop = [
     'Unnamed: 0', 'index', 'search_term', 'search_location', 'commute_time',
     'thumbnail', 'salary', 'salary_pay', 'salary_yearly', 'salary_hourly', 'salary_avg'
 ]
 df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
 
-#Remove any strange charater from "title"
+# Remove any strange charater from "title"
 df["title"] = df["title"].str.replace(r"[^a-zA-Z0-9\s,./\-&()]", "", regex=True)
 
 # Capitalize the first letter of each word in the job titles
 df["title"]= df["title"].str.title()
 
-# removes the prefix via from the via column
+# Removes the prefix via from the via column
 df['via'] = df['via'].str.replace(r'^via\s+', '', regex=True).str.strip()
 
-# removes whitespace around locations in the location column
+# Removes whitespace around locations in the location column
 df['location'] = df['location'].str.strip()
 
-df["date"] = pd.to_datetime(df["date_time"]).dt.date
+df["Date"] = pd.to_datetime(df["date_time"]).dt.date
 
-# function to standardize schedule_type into binary Columns
+# Function to standardize schedule_type into binary Columns
 def feature_engineer_schedule_type(df):
     all_types = ['Full-time', 'Part-time', 'Contractor', 'Internship', 'Temp work', 'Per diem', 'Volunteer']
     df = df.copy()
@@ -62,20 +62,20 @@ exp_pattern = r"(?:(?:at least|min(?:imum)? of)\s*\d+\s*years?)|(?:\d+\+?\s*[-â€
 # Find Min and Max Degree required for role
 degree_pattern = r"(?:Bachelor(?:'s)?|BA|BS|BSc|Master(?:'s)?|MS|MSc|MBA|PhD|Doctorate|degree in [A-Za-z ]+)"
 
-# function for standardizing job titles
+# Function for standardizing job titles
 def normalize_title(title):
     title = title.lower() # makes lowercase
-    title = re.sub(r'(sr\.?|senior)', 'senior', title) # standardize senior
-    title = re.sub(r'(jr\.?|junior)', 'junior', title) # standardize junior
-    title = re.sub(r'\s*-\s*.*$', '', title) # removes suffices like '-contract to hire'
-    title = re.sub(r'[^\w\s]', '', title) # removes punctiation
+    title = re.sub(r'(sr\.?|senior)', 'senior', title) # Standardize senior
+    title = re.sub(r'(jr\.?|junior)', 'junior', title) # Standardize junior
+    title = re.sub(r'\s*-\s*.*$', '', title) # Removes suffices like '-contract to hire'
+    title = re.sub(r'[^\w\s]', '', title) # Removes punctiation
     title = title.strip()
     return title
 
 df['title'] = df['title'].apply(normalize_title)
 
 # Create Boolean columns to indicate whether a job description mentions
-# experience or degree requirements based on regex pattern matching
+# Experience or degree requirements based on regex pattern matching
 df["Has_experience_requirement"] = df["description"].str.contains(exp_pattern, flags=re.IGNORECASE,regex=True).astype(int)
 df["Has_degree_requirement"] = df["description"].str.contains(degree_pattern, flags=re.IGNORECASE, regex=True).astype(int)
 
@@ -91,7 +91,7 @@ skills = [
 # Make sure description has no missing values
 df["description"] = df["description"].fillna("")
 
-print('creating features, this may take a couple of minutes')
+print('Creating features, this should take a few minutes')
 
 # Create one column for each skill (True if the skill is mentioned)
 for skill in skills:
@@ -109,7 +109,6 @@ skill_counts = Counter(all_skills)
 
 # Put into a DataFrame
 skill_df = pd.DataFrame(skill_counts.most_common(20), columns=["Skill", "Frequency"])
-
 
 text_cols = [col for col in ['description', 'extensions'] if col in df.columns]
 df['has_pay_range'] = df[text_cols].apply(
@@ -164,7 +163,8 @@ def choose_state(row):
     return row['location_state'] if pd.notnull(row['location_state']) else row['region_state']
 
 df['state_result'] = df.apply(choose_state, axis=1)
-job_counts = df['state_result'].value_counts().sort_values(ascending=False)
+
+df['location_found'] = df['state_result'].apply(lambda x: 'Found' if pd.notnull(x) else 'Unknown')
 
 us_states = {
     'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
@@ -184,7 +184,6 @@ df['State'] = valid_states['location_state']
 df = df.drop(columns=['location_df', 'location_city', 'state_result', 'region_keyword', 'region_state', 'location_state'])
 
 # Adding work type feature
-
 def classify_work_type(text):
     text_lower = text.lower() if isinstance(text, str) else ''
     remote_keywords = ["remote", "work from home", "telecommute", "virtual", "distributed team"]
@@ -207,7 +206,30 @@ def classify_work_type(text):
 # Add the new feature column to your DataFrame
 df['Work_type'] = df['description'].apply(classify_work_type)
 
-#filling nulls to load SQL tables
+# Creating feature for AI related keywords
+keywords = [
+    "AI", "LLM", "NLP", "machine learning", "deep learning",
+    "artificial intelligence", "chatbot", "transformer model", "generative"
+]
+
+# Build regex pattern with smart word boundaries, case-insensitive
+pattern = re.compile(
+    r'(?i)\b(?:' + '|'.join([
+        "AI", "LLMs?", "NLP", "machine learning", "deep learning",
+        "artificial intelligence", "chatbots?", "transformer models?", "generative"
+    ]) + r')\b'
+)
+
+def extract_keywords(text):
+    if pd.isna(text):
+        return []
+    matches = pattern.findall(text)
+    return list(set(match.upper() for match in matches))  # deduplicate, normalize case
+
+# Apply the function to the DataFrame
+df['AI_keywords'] = df['description'].apply(extract_keywords)
+
+# Filling nulls to load SQL tables
 df.replace(['', 'nan', 'NaN', 'None', None], np.nan, inplace=True)
 
 df['salary_max'] = df['salary_max'].fillna(df['salary_max'].median())
@@ -226,7 +248,9 @@ df['location'] = df['location'].fillna('Unknown')
 
 df = feature_engineer_schedule_type(df)
 
-df.to_csv("data/cleaned_gsearch_jobs.csv", index=False, encoding='utf-8')
+# Rename only columns that start with lowercase letters
+df = df.rename(
+    columns={col: col[0].upper() + col[1:] for col in df.columns if re.match(r'^[a-z]', col)},
+)
 
-# Load the cleaned CSV
-df = pd.read_csv("data/cleaned_gsearch_jobs.csv")
+df.to_csv("data/processed/cleaned_gsearch_jobs.csv", index=False, encoding='utf-8')
