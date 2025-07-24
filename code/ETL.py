@@ -30,6 +30,8 @@ df = df.drop_duplicates(subset="job_id", keep="first")
 columns_to_drop = [
     'Unnamed: 0', 'index', 'search_term', 'search_location', 'commute_time',
     'thumbnail', 'salary', 'salary_pay', 'salary_yearly', 'salary_hourly', 'salary_avg'
+    'posted_at', 'job_id', 'salary_rate', 'salary_min', 'salary_max',
+    'description_tokens', 'work_from_home'
 ]
 df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
 
@@ -224,7 +226,7 @@ def extract_keywords(text):
     if pd.isna(text):
         return []
     matches = pattern.findall(text)
-    return list(set(match.upper() for match in matches))  # deduplicate, normalize case
+    return list(set(match.upper() for match in matches))  # Deduplicate, normalize case
 
 # Apply the function to the DataFrame
 df['AI_keywords'] = df['description'].apply(extract_keywords)
@@ -232,18 +234,11 @@ df['AI_keywords'] = df['description'].apply(extract_keywords)
 # Filling nulls to load SQL tables
 df.replace(['', 'nan', 'NaN', 'None', None], np.nan, inplace=True)
 
-df['salary_max'] = df['salary_max'].fillna(df['salary_max'].median())
-df['salary_min'] = df['salary_min'].fillna(df['salary_min'].median())
 df['salary_standardized'] = df['salary_standardized'].fillna(df['salary_standardized'].median())
-df['salary_rate'] = df['salary_rate'].fillna(df['salary_rate'].mode()[0])
-df['work_from_home'] = df['work_from_home'].fillna(df['work_from_home'].mode()[0])
 df['schedule_type'] = df['schedule_type'].fillna(df['schedule_type'].mode()[0])
-
 df['State'] = df['State'].fillna(df['State'].mode()[0])
-
 df['title'] = df['title'].fillna(df['title'].mode()[0])
 df['via'] = df['via'].fillna(df['via'].mode()[0])
-df['posted_at'] = df['posted_at'].fillna(df['posted_at'].mode()[0])
 df['location'] = df['location'].fillna('Unknown')
 
 df = feature_engineer_schedule_type(df)
@@ -253,4 +248,51 @@ df = df.rename(
     columns={col: col[0].upper() + col[1:] for col in df.columns if re.match(r'^[a-z]', col)},
 )
 
+# Creating feature for minimum years of experience
+yrs_exp_pattern = r'(?i)(?:at least|min(?:imum)? of)?\s*(\d+)\+?\s*(?:[-–to]{1,3}\s*(\d+))?\s+years?'
+
+def extract_min_experience(text):
+    matches = re.findall(yrs_exp_pattern, text)
+    if matches:
+        return int(matches[0][0])
+    else:
+        return np.nan
+
+# Extract min years from description
+df["Min_Years_Experience"] = df["Description"].apply(extract_min_experience)
+
+# Handle missing (optional: fill with 0 or keep NaN)
+df["Min_Years_Experience"] =  df["Min_Years_Experience"].fillna(0)
+
+# Bin the experience years
+def bin_experience(min_years):
+    if pd.isna(min_years):
+        return "Not Specified"
+    elif min_years <= 3:
+        return "0-3 years"
+    elif 4 <= min_years <= 6:
+        return "4-6 years"
+    else:
+        return "7+ years"
+
+df["Experience_Bin"] = df["Min_Years_Experience"].apply(bin_experience)
+
+# Map bins to seniority levels
+def seniority_level(exp_bin):
+    if exp_bin in ["0-3 years", "No Experience Required"]:
+        return "Entry-Level"
+    elif exp_bin == "4-6 years":
+        return "Mid-Level"
+    elif exp_bin == "7+ years":
+        return "Senior-Level"
+    else:
+        return "Unknown"
+
+df["Seniority_Level"] = df["Experience_Bin"].apply(seniority_level)
+
+# Dropping columns that are no longer needed after info is extracted from them
+df = df.drop(columns=["Description", "Extensions", "Date_time", "Experience_Bin", "Location_found"])
+
+# ===Loading to CSV===
 df.to_csv("data/processed/cleaned_gsearch_jobs.csv", index=False, encoding='utf-8')
+df.to_excel("data/processed/cleaned_gsearch_jobs.xlsx", index=False)
