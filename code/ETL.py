@@ -19,11 +19,10 @@ os.remove(zip_path)
 
 df = pd.read_csv("data/raw/gsearch_jobs.csv")
 
-# ===Data transformation===
-
-df[df.duplicated("job_id")]
+# ===Data transformations===
 
 # Remove duplicates from "Job_id" and keep those that were posted first
+df[df.duplicated("job_id")]
 df = df.drop_duplicates(subset="job_id", keep="first")
 
 # Dropping columns
@@ -34,6 +33,30 @@ columns_to_drop = [
     'description_tokens', 'work_from_home'
 ]
 df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
+
+#Define degree pattern
+degree_pattern = r"(Bachelor(?:'s)?|BA|BS|BSc|Master(?:'s)?|MS|MSc|MBA|PhD|Doctorate|degree in [A-Za-z ]+)"
+
+#Extract degree mentions
+df["Degree_Requirement"] = df["description"].str.findall(degree_pattern, flags=re.IGNORECASE)
+
+# Clean and join matches into one string
+df["Degree_Requirement"] = df["Degree_Requirement"].apply(
+    lambda x: ", ".join(set([i.strip().title() for i in x])) if x else None
+)
+
+#Create binary flags
+degree_keywords = {
+    "Bachelor": ["bachelor", "ba", "bs", "bsc"],
+    "Master": ["master", "ms", "msc"],
+    "MBA": ["mba"],
+    "PhD": ["phd", "doctorate"]
+}
+
+for degree, keywords in degree_keywords.items():
+    df[f"Has_{degree}"] = df["Degree_Requirement"].str.lower().apply(
+        lambda text: int(any(kw in text for kw in keywords)) if isinstance(text, str) else 0
+    )
 
 # Remove any strange charater from "title"
 df["title"] = df["title"].str.replace(r"[^a-zA-Z0-9\s,./\-&()]", "", regex=True)
@@ -75,11 +98,6 @@ def normalize_title(title):
     return title
 
 df['title'] = df['title'].apply(normalize_title)
-
-# Create Boolean columns to indicate whether a job description mentions
-# Experience or degree requirements based on regex pattern matching
-df["Has_experience_requirement"] = df["description"].str.contains(exp_pattern, flags=re.IGNORECASE,regex=True).astype(int)
-df["Has_degree_requirement"] = df["description"].str.contains(degree_pattern, flags=re.IGNORECASE, regex=True).astype(int)
 
 # List of desired technical skills
 skills = [
@@ -123,7 +141,7 @@ visa_keywords = ['h-1b', 'h1b', 'h-2b', 'l-1a', 'l-1b', 'o-1', 'eb-2', 'eb2', 'e
 
 # Function to return 1 if any visa keyword is found in the description, else 0
 def binary_visa_flag(description):
-    desc = str(description).lower()  # ensure description is a string
+    desc = str(description).lower()  # Ensure description is a string
     return int(any(kw in desc for kw in visa_keywords))
 
 # Add the binary column to your existing DataFrame
@@ -243,7 +261,7 @@ df['location'] = df['location'].fillna('Unknown')
 
 df = feature_engineer_schedule_type(df)
 
-# Rename only columns that start with lowercase letters
+# Rename columns that start with lowercase letters into uppercase
 df = df.rename(
     columns={col: col[0].upper() + col[1:] for col in df.columns if re.match(r'^[a-z]', col)},
 )
@@ -291,8 +309,10 @@ def seniority_level(exp_bin):
 df["Seniority_Level"] = df["Experience_Bin"].apply(seniority_level)
 
 # Dropping columns that are no longer needed after info is extracted from them
-df = df.drop(columns=["Description", "Extensions", "Date_time", "Experience_Bin", "Location_found"])
+df = df.drop(columns= [
+    "Extensions", "Date_time", "Experience_Bin", "Location_found" ,
+      "Skills_found", "Posted_at", "Description", "Salary_avg"
+    ])
 
 # ===Loading to CSV===
 df.to_csv("data/processed/cleaned_gsearch_jobs.csv", index=False, encoding='utf-8')
-df.to_excel("data/processed/cleaned_gsearch_jobs.xlsx", index=False)
