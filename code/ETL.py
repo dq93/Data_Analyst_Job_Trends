@@ -34,10 +34,10 @@ columns_to_drop = [
 ]
 df = df.drop(columns=[col for col in columns_to_drop if col in df.columns])
 
-#Define degree pattern
+# Define degree pattern
 degree_pattern = r"(Bachelor(?:'s)?|BA|BS|BSc|Master(?:'s)?|MS|MSc|MBA|PhD|Doctorate|degree in [A-Za-z ]+)"
 
-#Extract degree mentions
+# Extract degree mentions
 df["Degree_Requirement"] = df["description"].str.findall(degree_pattern, flags=re.IGNORECASE)
 
 # Clean and join matches into one string
@@ -45,7 +45,7 @@ df["Degree_Requirement"] = df["Degree_Requirement"].apply(
     lambda x: ", ".join(set([i.strip().title() for i in x])) if x else None
 )
 
-#Create binary flags
+# Create binary flags
 degree_keywords = {
     "Bachelor": ["bachelor", "ba", "bs", "bsc"],
     "Master": ["master", "ms", "msc"],
@@ -148,17 +148,58 @@ def binary_visa_flag(description):
 df["visa_sponsorship_flag"] = df["description"].apply(binary_visa_flag)
 
 # Using regions to find and filter states
-df['description'] = df['description'].fillna('').astype(str)
+valid_states = {
+    'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
+    'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
+    'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+    'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
+    'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+    'DC'
+}
+
+# Define AR/VR-related keywords to avoid misclassifying "AR" as Arkansas
+ar_keywords = [
+    "ar/vr", "augmented reality", "virtual reality", "mixed reality", "xr",
+    "spatial computing", "vr headset", "ar headset", "meta quest", "oculus"
+]
+
+# Extract (city, state) from text
 def city_state(text):
-    matches = re.findall(r'\b([A-Za-z\s]+),\s*([A-Z]{2})\b', text)
-    return matches
-df['location_df'] = df['description'].apply(city_state)
-df['location_city'] = df['location_df'].apply(lambda x: x[0][0] if x else None)
-df['location_state'] = df['location_df'].apply(lambda x: x[0][1] if x else None)
+    if not isinstance(text, str):
+        return []
+    text_lower = text.lower()
+    is_ar_text = any(term in text_lower for term in ar_keywords)
+
+    matches = re.findall(r'\b([A-Za-z\s]+?),\s*([A-Z]{2})\b', text)
+
+    excl_non_city_keywords = {
+        "are", "we", "you", "the", "they", "join", "as", "with", "and", "be", "or", "to", "in", "for"
+    }
+
+    results = []
+    for city, state in matches:
+        city_clean = city.strip().lower()
+        if state not in valid_states:
+            continue
+        if city_clean in excl_non_city_keywords:
+            continue
+        if state == "AR" and is_ar_text:
+            continue
+        results.append((city.title(), state))
+    return results
+
+# Apply city/state extraction to Description
+df['location_data'] = df['description'].apply(city_state)
+df['location_city'] = df['location_data'].apply(lambda x: x[0][0] if x else None)
+df['location_state'] = df['location_data'].apply(lambda x: x[0][1] if x else None)
+
+# Define keyword-based region lookup
 location_keywords = {
     "bay area": "CA",
     "silicon valley": "CA",
     "new york city": "NY",
+    "manhattan": "NY",
+    "new york": "NY",
     "nyc": "NY",
     "tri-state": "NY",
     "los angeles": "CA",
@@ -169,39 +210,64 @@ location_keywords = {
     "atlanta metro": "GA",
     "boston area": "MA",
     "san francisco": "CA",
-    "washington dc": "DC"
+    "washington dc": "DC",
+    "austin": "TX", 
+    "houston": "TX", 
+    "dallas": "TX", 
+    "san antonio": "TX",
+    "denver": "CO", 
+    "boulder": "CO", 
+    "miami": "FL", 
+    "orlando": "FL",
+    "phoenix": "AZ", 
+    "scottsdale": "AZ", 
+    "pittsburgh": "PA",
+    "san diego": "CA", 
+    "oakland": "CA", 
+    "sacramento": "CA",
+    "raleigh": "NC", 
+    "charlotte": "NC", 
+    "nashville": "TN",
+    "columbus": "OH", 
+    "minneapolis": "MN", 
+    "st. paul": "MN",
+    "detroit": "MI", 
+    "indianapolis": "IN"
 }
+
 def find_region_keywords(text):
     text = text.lower()
     for keyword, state in location_keywords.items():
         if keyword in text:
             return keyword, state
-        return None, None
+    return None, None
 
+# Apply keyword-based region match
 df[['region_keyword', 'region_state']] = df['description'].apply(lambda x: pd.Series(find_region_keywords(x)))
+
+# Choose the best state result: from regex match first, then keyword
 def choose_state(row):
     return row['location_state'] if pd.notnull(row['location_state']) else row['region_state']
 
 df['state_result'] = df.apply(choose_state, axis=1)
 
-df['location_found'] = df['state_result'].apply(lambda x: 'Found' if pd.notnull(x) else 'Unknown')
+# Also parse the original Location field as backup
+df['loc_data'] = df['location'].apply(city_state)
+df['loc_city'] = df['loc_data'].apply(lambda x: x[0][0] if x else None)
+df['loc_state'] = df['loc_data'].apply(lambda x: x[0][1] if x else None)
 
-us_states = {
-    'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
-    'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
-    'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
-    'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
-    'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
-    'DC'
-}
-valid_states = df[df['state_result'].isin(us_states)]
+# Use loc_state if state_result is still missing
+df['state_result'] = df['state_result'].fillna(df['loc_state'])
 
-valid_states['location_state']
+# Final location classification
+def classify_us_locations(row):
+    return row['state_result'] if pd.notnull(row['state_result']) else 'US'
 
-df['State'] = valid_states['location_state']
+df['State'] = df.apply(classify_us_locations, axis=1)
 
-# Droppping columns and features no longer needed
-df = df.drop(columns=['location_df', 'location_city', 'state_result', 'region_keyword', 'region_state', 'location_state'])
+# Droppping state related columns no longer needed
+df = df.drop(columns=['location_data', 'location_city', 'state_result', 'region_keyword', 'region_state', 'location_state',
+                      'loc_data', 'loc_city', 'loc_state'])
 
 # Adding work type feature
 def classify_work_type(text):
@@ -223,7 +289,7 @@ def classify_work_type(text):
         return "In-Office"
     # If none matched
     return "Unknown"
-# Add the new feature column to your DataFrame
+# Add the new feature to your DataFrame
 df['Work_type'] = df['description'].apply(classify_work_type)
 
 # Creating feature for AI related keywords
@@ -249,7 +315,7 @@ def extract_keywords(text):
 # Apply the function to the DataFrame
 df['AI_keywords'] = df['description'].apply(extract_keywords)
 
-# Filling nulls to load SQL tables
+# Filling any remaining nulls in features
 df.replace(['', 'nan', 'NaN', 'None', None], np.nan, inplace=True)
 
 df['salary_standardized'] = df['salary_standardized'].fillna(df['salary_standardized'].median())
@@ -310,8 +376,8 @@ df["Seniority_Level"] = df["Experience_Bin"].apply(seniority_level)
 
 # Dropping columns that are no longer needed after info is extracted from them
 df = df.drop(columns= [
-    "Extensions", "Date_time", "Experience_Bin", "Location_found" ,
-      "Skills_found", "Posted_at", "Description", "Salary_avg"
+    "Description", "Extensions", "Date_time", "Experience_Bin",
+      "Skills_found", "Posted_at", "Salary_avg"
     ])
 
 # ===Loading to CSV===
