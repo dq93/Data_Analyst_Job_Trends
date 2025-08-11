@@ -382,3 +382,4 @@ df = df.drop(columns= [
 
 # ===Loading to CSV===
 df.to_csv("data/processed/cleaned_gsearch_jobs.csv", index=False, encoding='utf-8')
+df.to_excel("data/processed/cleaned_gsearch_jobs.xlsx", index=False)
