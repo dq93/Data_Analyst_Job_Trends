@@ -1,4 +1,5 @@
-# Data on Data Analysts
+<img width="1536" height="1024" alt="Image" src="https://github.com/user-attachments/assets/69736c15-e31b-4237-bc2e-5598fbc98c57" />
+
 
 ## Project Overview
 
@@ -8,13 +9,17 @@ Link to dataset: https://www.kaggle.com/datasets/lukebarousse/data-analyst-job-p
 
 ## Team members:
 
-Kevin Bonilla
+Kevin Bonilla<br>
+LinkedIn: https://www.linkedin.com/in/kevin-bonilla-34578421a/
 
-Maimuna Hamidu-Bawa
+Maimuna Hamidu-Bawa<br>
+LinkedIn: https://www.linkedin.com/in/maimuna-bawa/
 
-Ricardi Jean
+Ricardi Jean<br>
+LinkedIn: https://www.linkedin.com/in/ricardi-jean/
 
-Daniel Quintanilla
+Daniel Quintanilla<br>
+LinkedIn: https://www.linkedin.com/in/danieljquintanilla/
 
 ## This Project has 3 parts:
 - Exploratory Data Analysis: Univariate, Bivariate, and Multivariate
