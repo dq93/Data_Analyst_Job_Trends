@@ -1,4 +1,4 @@
-<img width="800" height="512" alt="Image" src="https://github.com/user-attachments/assets/69736c15-e31b-4237-bc2e-5598fbc98c57" />
+<img width="750" height="482" alt="Image" src="https://github.com/user-attachments/assets/69736c15-e31b-4237-bc2e-5598fbc98c57" />
 
 
 ## Project Overview
@@ -166,7 +166,7 @@ LinkedIn, Bebee, and Upwork are the top 3 job search sites.
 - Kaggle 🧠
 
 Link to project report:
-https://docs.google.com/document/d/1tRb0BxIn_sGou41dBsQ9uev3CC3PWv8sYdlx8wLXOzc/edit?tab=t.0
+https://docs.google.com/document/d/1tRb0BxIn_sGou41dBsQ9uev3CC3PWv8sYdlx8wLXOzc/edit?usp=sharing
 
 Link to Tableau dashboard:
 https://public.tableau.com/app/profile/maimuna.hamidu.bawa/viz/JobMarketDashboard_17551838770280/Dashboard1
