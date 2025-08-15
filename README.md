@@ -171,3 +171,6 @@ https://docs.google.com/document/d/1tRb0BxIn_sGou41dBsQ9uev3CC3PWv8sYdlx8wLXOzc/
 Link to Tableau dashboard:
 https://public.tableau.com/app/profile/maimuna.hamidu.bawa/viz/JobMarketDashboard_17551838770280/Dashboard1
 
+Link to slides for presentation on this project:
+https://www.canva.com/design/DAGwCyV0lL8/VkM91wZPu2A0M6aa2TKQgg/edit?utm_content=DAGwCyV0lL8&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton
+
